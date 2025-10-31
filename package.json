@@ -27,12 +27,16 @@
         "appId": "com.SUNTAIYO.ChehJule",
         "productName": "ChehJule",
         "files": ["src/**/*"],
-        "directories": {"buildResources": "assets"},
+        "directories": {
+            "buildResources": "assets" ,
+            "output": "release"
+        },
         "win": {
             "target": "nsis",
             "icon": "src/assets/ChehJule1.ico"
         },
         "publish": [{ "provider": "github" }]
+        
     },
     "repository": {
         "type": "git",

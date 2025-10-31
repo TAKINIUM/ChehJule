@@ -18,5 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     send: (channel, data) =>ipcRenderer.send(channel, data),
     stopServer: () => ipcRenderer.send('stop-server'),
     removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
-    getPublicIp: () => ipcRenderer.invoke('get-public-ip')
+    getPublicIp: () => ipcRenderer.invoke('get-public-ip'),
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });

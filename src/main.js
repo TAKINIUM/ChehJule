@@ -1,4 +1,4 @@
-const {app , BrowserWindow , ipcMain , protocol , dialog} = require("electron")
+const {app , BrowserWindow , ipcMain , protocol , dialog , shell} = require("electron")
 const path = require("path")
 const fs = require('fs')
 const saveManager = require('./game/SaveManager')
@@ -12,20 +12,40 @@ app.setPath('userData', `${app.getPath('userData')}-${instanceId}`)
 
 let mainWindow
 let isQuitting = false
-let io; // <-- AJOUT : Pour garder une référence au serveur
-let httpServer;
+let io
+let httpServer
+
+ipcMain.handle('get-app-version', () => app.getVersion())
+ipcMain.handle('open-external', (e, url) => shell.openExternal(url))
 
 function getLocalIp() {
     const nets = os.networkInterfaces();
     for (const name of Object.keys(nets)) {
         for (const net of nets[name]) {
-            // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
             if (net.family === 'IPv4' && !net.internal) {
                 return net.address;
             }
         }
     }
     return '127.0.0.1';
+}
+
+async function getPublicIp() {
+    const https = require('https')
+    return new Promise((resolve) => {
+        https.get('https://api.ipify.org?format=json', (res) => {
+            let raw = ''
+            res.on('data', (c) => raw += c)
+            res.on('end', () => {
+                try {
+                    const obj = JSON.parse(raw)
+                    resolve(obj.ip || null)
+                } catch {
+                    resolve(null)
+                }
+            })
+        }).on('error', () => resolve(null))
+    })
 }
 
 function createWindow() {
@@ -58,11 +78,12 @@ app.whenReady().then(() => {
         callback({ path: path.normalize(`${__dirname}/${url}`) })
     })
 
-    ipcMain.on('start-server', (event) => {
+    ipcMain.on('start-server', async (event) => {
         if (httpServer && httpServer.listening) {
-            const port = httpServer.address().port;
-            const ip = getLocalIp();
-            if (mainWindow) mainWindow.webContents.send('server-started', { ip, port });
+            const port = httpServer.address().port
+            const ip = getLocalIp()
+            const publicIp = await getPublicIp()
+            if (mainWindow) mainWindow.webContents.send('server-started', { ip, publicIp, port })
             return
         }
         
@@ -86,9 +107,10 @@ app.whenReady().then(() => {
             });
         });
 
-        httpServer.listen(port , "0.0.0.0" , () => {
-            console.log(`Serveur démarré sur ${ip}:${port}`);
-            if (mainWindow) mainWindow.webContents.send('server-started', { ip, port });
+        httpServer.listen(port , "0.0.0.0" , async () => {
+            const publicIp = await getPublicIp()
+            console.log(`Serveur démarré sur ${ip}:${port} (public: ${publicIp || 'inconnu'})`);
+            if (mainWindow) mainWindow.webContents.send('server-started', { ip, publicIp, port });
         });
     });
 
@@ -131,23 +153,7 @@ app.whenReady().then(() => {
         }
     });
 
-    ipcMain.handle('get-public-ip', async () => {
-        const https = require('https');
-        return new Promise((resolve) => {
-            https.get('https://api.ipify.org?format=json', (res) => {
-                let raw = '';
-                res.on('data', (chunk) => raw += chunk);
-                res.on('end', () => {
-                    try {
-                        const obj = JSON.parse(raw);
-                        resolve(obj.ip || null);
-                    } catch {
-                        resolve(null);
-                    }
-                });
-            }).on('error', () => resolve(null));
-        });
-    });
+    ipcMain.handle('get-public-ip', () => getPublicIp())
 
     ipcMain.handle('get-saves', saveManager.getSaves)
     ipcMain.on('save-saves', (event, data) => saveManager.saveSaves(data))

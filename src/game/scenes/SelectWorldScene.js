@@ -18,7 +18,11 @@ export class SelectWorldScene extends Phaser.Scene {
         this.load.html('worldform', 'assets/html/worldform.html')
     }
 
-    create() {
+    async create() {
+
+        const pubIp = await window.electronAPI.getPublicIp()
+        this.add.text(10, 10, `Public: ${pubIp || 'indispo'}:3000`, { font: '14px Arial', fill: '#ccc' })
+
         this.cameras.main.setBackgroundColor('#333333')
 
         this.uiGroup = this.add.group()
