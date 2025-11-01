@@ -16,9 +16,15 @@ export class SelectWorldScene extends Phaser.Scene {
     preload() {
         this.load.html('nameform', 'assets/html/nameform.html')
         this.load.html('worldform', 'assets/html/worldform.html')
+
+        this.load.audio('menu_intro', 'assets/audio/Title_intro_Current.wav')
+        this.load.audio('menu_loop', 'assets/audio/Title_loop_Current.wav')
     }
 
     async create() {
+
+        this.sound.pauseOnBlur = false
+        this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.TAB])
 
         const pubIp = await window.electronAPI.getPublicIp()
         this.add.text(10, 10, `Public: ${pubIp || 'indispo'}:3000`, { font: '14px Arial', fill: '#ccc' })

@@ -24,24 +24,38 @@ export class GameScene extends Phaser.Scene {
     }
 
     preload() {
-        this.load.image('tiles', 'assets/images/tileset.png')
-        this.load.image('tree', 'assets/images/Trees.png')
-        this.load.tilemapTiledJSON('map', 'assets/maps/map.json')
-        this.load.image('player', 'assets/images/player.png')
+        this.load.spritesheet("tiles" , "assets/images/tileset.png" , { frameWidth: 32, frameHeight: 32 })
+        this.load.tilemapTiledJSON("map" , "assets/maps/map.json")
+        this.load.image("player" , "assets/images/player.png")
         this.load.spritesheet("doors" , "assets/images/Doors.png" , { frameWidth: 32, frameHeight: 32 })
+        this.load.spritesheet('trees', 'assets/images/Trees.png', { frameWidth: 64, frameHeight: 64 })
+        this.load.spritesheet('plants', 'assets/images/Plants.png', { frameWidth: 32, frameHeight: 32 })
+        this.load.spritesheet('beds', 'assets/images/Beds.png', { frameWidth: 64, frameHeight: 64 })
     }
 
     async create() {
 
+        this.sound.pauseOnBlur = false
+        this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.TAB])
+
+        
         // --- Carte ---
+        const tsByName = (name) => this.make.tilemap({ key: 'map' }).tilesets.find(t => t.name === name) || (this.scene.map ? this.scene.map.tilesets.find(t => t.name === name) : null)
         const map = this.make.tilemap({ key: 'map' })
+        const toCenter = (obj, tw, th) => ({ x: obj.x + tw / 2, y: obj.y - th / 2 })
+        const FLIP_H = 0x80000000, FLIP_V = 0x40000000, FLIP_D = 0x20000000
+        const frameFromGid = (ts, gid) => ((gid >>> 0) & ~(FLIP_H | FLIP_V | FLIP_D)) - ts.firstgid
+
+        this.beds = this.add.group()
+        this.bedColliders = this.physics.add.staticGroup()
+        this.caches = this.add.group()
+
         const tileset = map.addTilesetImage('Tileset', 'tiles')
         map.createLayer("Sol", tileset, 0, 0)
         map.createLayer("Plancher", tileset, 0 , 0)
         map.createLayer("Route" , tileset , 0 , 0)
         const wallsLayer = map.createLayer("Mur", tileset, 0, 0)
         const DecoColLayer = map.createLayer("Deco collision" , tileset , 0 , 0)
-        const TreeLayer = map.getObjectLayer("Porte")
         wallsLayer.setCollisionByExclusion([-1])
         DecoColLayer.setCollisionByExclusion([-1])
 
@@ -85,7 +99,7 @@ export class GameScene extends Phaser.Scene {
             this.updateDoorState(door , door.isOpen)
         })
 
-         // Création du joueur local (important de le faire avant le réseau)
+         // Création du joueur local
         const savedPlayerPos = this.worldData.players[this.playerName]
         const spawnLayer = map.getObjectLayer('PlayerSpawn');
         const spawnPointObj = spawnLayer ? spawnLayer.objects[0] : null;
@@ -95,8 +109,111 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.player , wallsLayer)
         this.physics.add.collider(this.player , DecoColLayer)
         this.physics.add.collider(this.player , this.doors)
-        this.physics.add.collider(this.player , TreeLayer)
         this.player.nameText = this.add.text(0, 0, this.playerName, { font: '14px Arial', fill: '#ffffff' }).setOrigin(0.5)
+
+        this.borderWalls = this.physics.add.staticGroup()
+        this.trees = this.physics.add.staticGroup()
+        this.pots = this.physics.add.staticGroup()
+        this.caches = this.add.group()
+
+        const addStaticFromTileObj = (layerName, tilesetName, textureKey) => {
+            const ts = tsByName(tilesetName)
+            if (!ts) return []
+            const tw = ts.tileWidth, th = ts.tileHeight
+            const objs = (map.getObjectLayer(layerName)?.objects) || []
+            const out = []
+            for (const obj of objs) {
+                if (typeof obj.gid !== 'number') continue
+                const frame = obj.gid - ts.firstgid
+                const { x, y } = toCenter(obj, tw, th)
+                const s = this.add.sprite(x, y, textureKey, frame).setOrigin(0.5)
+                this.physics.add.existing(s, true)
+                s.body.setSize(tw, th)
+                s.body.updateFromGameObject()
+                out.push(s)
+            }
+            return out
+        }
+
+        {
+            const layer = map.getObjectLayer('Bordure')
+            if (layer?.objects?.length) {
+                for (const o of layer.objects) {
+                    const rx = o.x + o.width / 2
+                    const ry = o.y + o.height / 2
+                    const rect = this.add.rectangle(rx, ry, o.width, o.height, 0x00ff00, 0) // invisible
+                    this.physics.add.existing(rect, true)
+                    rect.body.setSize(o.width, o.height)
+                    rect.body.updateFromGameObject()
+                    this.borderWalls.add(rect)
+                }
+            }
+            this.physics.add.collider(this.player, this.borderWalls)
+        }
+        {
+            const sprites = addStaticFromTileObj('Arbre', 'Trees', 'trees')
+            sprites.forEach(s => this.trees.add(s))
+            this.physics.add.collider(this.player, this.trees)
+        }
+        {
+            const sprites = addStaticFromTileObj('Pots', 'Plants', 'plants')
+            sprites.forEach(s => this.pots.add(s))
+            this.physics.add.collider(this.player, this.pots)
+        }
+        {
+            const ts = map.tilesets.find(t => t.name === 'Beds')
+            const layer = map.getObjectLayer('Lit')
+            if (ts && layer?.objects?.length) {
+                const tw = ts.tileWidth, th = ts.tileHeight // 64x64
+                for (const obj of layer.objects) {
+                    if (typeof obj.gid !== 'number') continue
+                    const frame = frameFromGid(ts, obj.gid) // 0..3 sur l’image 128x128 (2x2)
+                    const { x, y } = toCenter(obj, tw, th)
+
+                    // Sprite visuel
+                    const bedSprite = this.add.sprite(x, y, 'beds', frame).setOrigin(0.5)
+                    this.beds.add(bedSprite)
+
+                    // Hitbox dans la tuile 64x64
+                    const hb = {
+                        0: { w: 32, h: 64, ox: 0,  oy: 0  }, // vertical gauche (TL)
+                        1: { w: 64, h: 32, ox: 0,  oy: 0  }, // horizontal haut (TR)
+                        2: { w: 64, h: 32, ox: 0,  oy: 32 }, // horizontal bas (BL)
+                        3: { w: 32, h: 64, ox: 32, oy: 0  }  // vertical droite (BR)
+                    }[frame] || { w: 32, h: 64, ox: 0, oy: 0 }
+
+                    // Position monde du collider (rectangle statique invisible)
+                    const left = x - tw / 2
+                    const top  = y - th / 2
+                    const cx = left + hb.ox + hb.w / 2
+                    const cy = top  + hb.oy + hb.h / 2
+
+                    const col = this.add.rectangle(cx, cy, hb.w, hb.h, 0x00ff00, 0)
+                    this.physics.add.existing(col, true)
+                    this.bedColliders.add(col)
+                }
+            }
+        }
+
+        this.physics.add.collider(this.player, this.bedColliders)
+        this.setupCollisionDebug({ wallsLayer, DecoColLayer })
+
+        {
+            const ts = map.tilesets.find(t => t.name === 'Tileset')
+            const layer = map.getObjectLayer('Cachette')
+            if (ts && layer?.objects?.length) {
+                const tw = ts.tileWidth, th = ts.tileHeight // 32x32
+                for (const obj of layer.objects) {
+                    if (typeof obj.gid !== 'number') continue
+                    const frame = frameFromGid(ts, obj.gid)
+                    const { x, y } = toCenter(obj, tw, th)
+                    const s = this.add.sprite(x, y, 'tiles', frame).setOrigin(0.5)
+                    s.setDepth(10)
+                    this.caches.add(s)
+                }
+            }
+        }
+
 
         // Menu Pause
         this.pauseMenu = this.add.group();
@@ -134,6 +251,123 @@ export class GameScene extends Phaser.Scene {
         this.keys = this.input.keyboard.addKeys({ up: 'Z', down: 'S', left: 'Q', right: 'D' , interact: "E"})
     
         this.initializeNetwork()
+    }
+
+    setupCollisionDebug({ wallsLayer, DecoColLayer }) {
+        // Graphics pour dessiner les tiles en collision
+        this._debug = { enabled: false }
+        this._debugGfx = this.add.graphics().setScrollFactor(1).setDepth(9999).setAlpha(0.65)
+
+        // Toggle F1
+        this.input.keyboard.on('keydown-F1', () => {
+            this._debug.enabled = !this._debug.enabled
+            this._debugGfx.clear()
+            if (this._debug.enabled) {
+                this.drawCollisionTiles(wallsLayer, DecoColLayer)
+                this.installCollisionLogging(wallsLayer, DecoColLayer)
+                console.log('[debug] collisions ON')
+            } else {
+                this.uninstallCollisionLogging()
+                console.log('[debug] collisions OFF')
+            }
+        })
+
+        // Noms lisibles pour les objets
+        const tag = (go, name) => go?.setData && go.setData('debugName', name)
+        tag(this.player, 'player')
+        tag(this.borderWalls, 'Bordure')
+        tag(this.trees, 'Arbre')
+        tag(this.pots, 'Pots')
+        tag(this.bedColliders, 'LitCollider')
+        tag(this.doors, 'Porte')
+
+        // Optionnel: activer d’entrée
+        // this.input.keyboard.emit('keydown-F1')
+    }
+
+    drawCollisionTiles(wallsLayer, DecoColLayer) {
+        this._debugGfx.clear()
+        const style = {
+            tileColor: null,
+            collidingTileColor: new Phaser.Display.Color(255, 128, 0, 140),
+            faceColor: new Phaser.Display.Color(0, 255, 255, 80)
+        }
+        wallsLayer.renderDebug(this._debugGfx, style)
+        DecoColLayer.renderDebug(this._debugGfx, style)
+
+        // Dessine aussi nos colliders manuels (bordures / lits) pour bien les voir
+        const stroke = (obj, color = 0x00ff00) => {
+            if (!obj) return
+            const draw = body => this._debugGfx.strokeRect(body.x, body.y, body.width, body.height)
+            this._debugGfx.lineStyle(2, color, 1)
+            if (obj.getChildren) {
+                obj.getChildren().forEach(c => c.body && draw(c.body))
+            } else if (obj.body) {
+                draw(obj.body)
+            }
+        }
+        stroke(this.borderWalls, 0xff00ff)
+        stroke(this.bedColliders, 0x00ffff)
+        stroke(this.trees, 0x33ff33)
+        stroke(this.pots, 0xffff33)
+        stroke(this.doors, 0xff3333)
+    }
+
+    installCollisionLogging(wallsLayer, DecoColLayer) {
+        // Log global bodies-bodies
+        this._onWorldCollide = (obj1, obj2) => {
+            const n = go => go?.getData?.('debugName') || go?.name || go?.texture?.key || go?.type || 'obj'
+            console.log(`[collide] ${n(obj1)} <-> ${n(obj2)}`)
+            this.flashBody(obj1)
+            this.flashBody(obj2)
+        }
+        this.physics.world.on('collide', this._onWorldCollide)
+
+        // Log bodies-tiles pour savoir quelle couche bloque
+        this._debugColliders = []
+        const markTile = (layerName, player, tile) => {
+            // surbrillance rapide du tile touché
+            this._debugGfx.lineStyle(3, 0xffffff, 1)
+            this._debugGfx.strokeRect(tile.pixelX, tile.pixelY, tile.width, tile.height)
+            console.log(`[tile] player <-> ${layerName} @ tileIndex=${tile.index} (x=${tile.x}, y=${tile.y})`)
+        }
+        this._debugColliders.push(
+            this.physics.add.collider(this.player, wallsLayer, (p, t) => markTile('Mur', p, t)),
+            this.physics.add.collider(this.player, DecoColLayer, (p, t) => markTile('Deco collision', p, t))
+        )
+
+        // Redessiner les tiles en collision à chaque seconde (utile si la caméra bouge)
+        this._debugTimer = this.time.addEvent({
+            delay: 1000,
+            loop: true,
+            callback: () => this._debug.enabled && this.drawCollisionTiles(wallsLayer, DecoColLayer)
+        })
+    }
+
+    uninstallCollisionLogging() {
+        if (this._onWorldCollide) {
+            this.physics.world.off('collide', this._onWorldCollide)
+            this._onWorldCollide = null
+        }
+        if (this._debugColliders) {
+            this._debugColliders.forEach(c => c?.destroy && c.destroy())
+            this._debugColliders = null
+        }
+        this._debugTimer?.remove?.()
+        this._debugGfx?.clear?.()
+    }
+
+    flashBody(go) {
+        const body = go?.body
+        if (!body || !this._debugGfx) return
+        this._debugGfx.lineStyle(3, 0xff00ff, 1)
+        this._debugGfx.strokeRect(body.x, body.y, body.width, body.height)
+        this.tweens.add({
+            targets: this._debugGfx,
+            alpha: 1,
+            duration: 80,
+            yoyo: true
+        })
     }
 
     initializeNetwork() {
@@ -470,6 +704,9 @@ export class GameScene extends Phaser.Scene {
             this.input.keyboard.removeAllListeners();
             if (this.input.keyboard.clearCaptures) this.input.keyboard.clearCaptures();
         } catch {}
+
+        try { this.uninstallCollisionLogging() } catch {}
+        try { this._debugGfx?.destroy?.(); this._debugGfx = null } catch {}
     }
 
     update(time, delta) {

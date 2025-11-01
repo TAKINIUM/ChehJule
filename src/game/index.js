@@ -10,6 +10,8 @@ const config = {
     parent: "game-container",
     pixelArt: true,
     backgroundColor: "#1a1a1a",
+    autoPause: false,
+    audio: {pauseOnBlur: false},
     dom: {
         createContainer: true
     },

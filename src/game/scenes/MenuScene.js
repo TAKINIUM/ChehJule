@@ -6,9 +6,26 @@ export class MenuScene extends Phaser.Scene {
 
     preload() {
         this.load.image("logo" , "assets/ChehJule1.ico")
+
+        this.load.audio('menu_intro', 'assets/audio/Title_intro_Current.wav')
+        this.load.audio('menu_loop', 'assets/audio/Title_loop_Current.wav')
     }
 
     async create() {
+
+        
+        this.sound.pauseOnBlur = false
+        const alreadyPlaying =
+            this.sound.get('menu_loop')?.isPlaying || this.sound.get('menu_intro')?.isPlaying
+        if (!alreadyPlaying && !this.registry.get('bgmStarted')) {
+            const intro = this.sound.add('menu_intro')
+            const loop = this.sound.add('menu_loop', { loop: true })
+            intro.once('complete', () => loop.play())
+            intro.play()
+            this.registry.set('bgmStarted', true)
+        }
+
+        this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.TAB])
 
         window.electronAPI?.onUpdateProgress?.((p) => {
             this.progressText?.setText(`MAJ: ${p.percent}%`)
