@@ -25,6 +25,7 @@ export class GameScene extends Phaser.Scene {
 
     preload() {
         this.load.image('tiles', 'assets/images/tileset.png')
+        this.load.image('tree', 'assets/images/Trees.png')
         this.load.tilemapTiledJSON('map', 'assets/maps/map.json')
         this.load.image('player', 'assets/images/player.png')
         this.load.spritesheet("doors" , "assets/images/Doors.png" , { frameWidth: 32, frameHeight: 32 })
@@ -35,10 +36,14 @@ export class GameScene extends Phaser.Scene {
         // --- Carte ---
         const map = this.make.tilemap({ key: 'map' })
         const tileset = map.addTilesetImage('Tileset', 'tiles')
-        map.createLayer('Sol', tileset, 0, 0)
-        map.createLayer('Plancher', tileset, 0, 0)
-        const wallsLayer = map.createLayer('Mur', tileset, 0, 0)
+        map.createLayer("Sol", tileset, 0, 0)
+        map.createLayer("Plancher", tileset, 0 , 0)
+        map.createLayer("Route" , tileset , 0 , 0)
+        const wallsLayer = map.createLayer("Mur", tileset, 0, 0)
+        const DecoColLayer = map.createLayer("Deco collision" , tileset , 0 , 0)
+        const TreeLayer = map.getObjectLayer("Porte")
         wallsLayer.setCollisionByExclusion([-1])
+        DecoColLayer.setCollisionByExclusion([-1])
 
         // --- Portes ---
         this.doors = this.physics.add.staticGroup()
@@ -47,7 +52,7 @@ export class GameScene extends Phaser.Scene {
         doorObjects.forEach((doorObj , index) => {
 
             const px = doorObj.x + (doorObj.width || 32) / 2
-            const py = doorObj.y + (doorObj.height || 32) / 2
+            const py = doorObj.y + (doorObj.height || 32) / 2 - 32
 
             const door = this.doors.create(px, py, "doors").setOrigin(0.5, 0.5)
             door.doorId = index
@@ -87,8 +92,10 @@ export class GameScene extends Phaser.Scene {
         let spawnPoint = savedPlayerPos || spawnPointObj || { x: 100, y: 100 }
         this.player = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, 'player')
         this.player.body.setSize(24, 24)
-        this.physics.add.collider(this.player, wallsLayer)
-        this.physics.add.collider(this.player, this.doors)
+        this.physics.add.collider(this.player , wallsLayer)
+        this.physics.add.collider(this.player , DecoColLayer)
+        this.physics.add.collider(this.player , this.doors)
+        this.physics.add.collider(this.player , TreeLayer)
         this.player.nameText = this.add.text(0, 0, this.playerName, { font: '14px Arial', fill: '#ffffff' }).setOrigin(0.5)
 
         // Menu Pause

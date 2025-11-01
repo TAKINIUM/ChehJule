@@ -5,15 +5,19 @@ export class MenuScene extends Phaser.Scene {
     }
 
     preload() {
-        this.load.image("logo" , "assets/images/ChehJule1.ico")
+        this.load.image("logo" , "assets/ChehJule1.ico")
     }
 
     async create() {
 
-        this.logo = this.add.image(0 , 0 , "logo").setOrigin(0.5).setScale(0.6)
+        window.electronAPI?.onUpdateProgress?.((p) => {
+            this.progressText?.setText(`MAJ: ${p.percent}%`)
+        })
+
+        this.logo = this.add.image(0 , 140 , "logo").setOrigin(0.5).setScale(0.8)
         this.tweens.add({
             targets: this.logo,
-            y: '+=10',
+            y: '+=20',
             duration: 2000,
             yoyo: true,
             repeat: -1,
@@ -27,7 +31,7 @@ export class MenuScene extends Phaser.Scene {
 
         this.tweens.add({
             targets: this.titleText,
-            scale: { from: 1.0, to: 1.04 },
+            scale: { from: 1.0, to: 1.1 },
             duration: 2500,
             yoyo: true,
             repeat: -1,

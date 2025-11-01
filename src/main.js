@@ -15,6 +15,67 @@ let isQuitting = false
 let io
 let httpServer
 
+let updaterWired = false
+function wireAutoUpdater() {
+    if (updaterWired) return
+    updaterWired = true
+
+    autoUpdater.autoDownload = false
+    autoUpdater.autoInstallOnAppQuit = true
+
+    autoUpdater.on('error', (e) => {
+        console.warn('[updater] error', e?.stack || e?.message || e)
+    })
+
+    autoUpdater.on('update-available', async (info) => {
+        const { response } = await dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            buttons: ['Télécharger maintenant', 'Plus tard'],
+            defaultId: 0,
+            cancelId: 1,
+            title: 'Mise à jour disponible',
+            message: `Une nouvelle version ${info.version} est disponible.`,
+            detail: 'Voulez-vous la télécharger maintenant ? Vous pourrez l’installer ensuite.'
+        })
+        if (response === 0) {
+            autoUpdater.downloadUpdate()
+        }
+    })
+
+    autoUpdater.on('download-progress', (p) => {
+        mainWindow?.webContents.send('update-download-progress', {
+            percent: Math.round(p.percent),
+            transferred: p.transferred,
+            total: p.total,
+            bytesPerSecond: p.bytesPerSecond
+        })
+    })
+
+    autoUpdater.on('update-downloaded', async (info) => {
+        const { response } = await dialog.showMessageBox(mainWindow, {
+            type: 'question',
+            buttons: ['Redémarrer et installer', 'Plus tard'],
+            defaultId: 0,
+            cancelId: 1,
+            title: 'Mise à jour prête',
+            message: `La version ${info.version} a été téléchargée.`,
+            detail: 'Installer maintenant va redémarrer l’application.'
+        })
+        if (response === 0) {
+            isQuitting = true
+            autoUpdater.quitAndInstall()
+        }
+    })
+}
+
+async function checkForUpdatesInteractive() {
+    try {
+        await autoUpdater.checkForUpdates()
+    } catch (e) {
+        console.warn('[updater] check failed', e?.message || e)
+    }
+}
+
 ipcMain.handle('get-app-version', () => app.getVersion())
 ipcMain.handle('open-external', (e, url) => shell.openExternal(url))
 
@@ -60,14 +121,16 @@ function createWindow() {
     })
 
     mainWindow.on("close" , (event) => {
-        if (isQuitting) {
-            return
-        }
+        if (isQuitting) return
         event.preventDefault()
         mainWindow.webContents.send("check-if-host")
     })
 
     mainWindow.loadFile(path.join(__dirname , "index.html"))
+    mainWindow.once("ready-to-show" , () => {
+        wireAutoUpdater()
+        checkForUpdatesInteractive()
+    })
     mainWindow.maximize()
 }
 
@@ -210,6 +273,12 @@ app.whenReady().then(() => {
     } catch (e) {
         console.warn("autoUpdate init failed: " , e?.message || e)
     }
+
+    ipcMain.handle('check-for-updates', async () => {
+        wireAutoUpdater()
+        await checkForUpdatesInteractive()
+        return true
+    })
 
     createWindow()
     app.on('activate', function () {
