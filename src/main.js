@@ -20,6 +20,11 @@ function wireAutoUpdater() {
     if (updaterWired) return
     updaterWired = true
 
+    if (!app.isPackaged) {
+        const instanceId = Date.now().toString()
+        app.setPath('userData', `${app.getPath('userData')}-${instanceId}`)
+    }
+
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
 

@@ -10,6 +10,9 @@ export class GameScene extends Phaser.Scene {
         this.myPeerId = null
         this.otherPlayers = new Map()
         this.doors = null
+        this.interactKey = null
+        this.interactHint = null
+        this.interactCandidate = null
     }
 
     init(data) {
@@ -97,6 +100,35 @@ export class GameScene extends Phaser.Scene {
             }
 
             this.updateDoorState(door , door.isOpen)
+        })
+
+                // Clé d'interaction
+        this.interactKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
+
+        // Marque les portes comme interactives (pour le hint)
+        if (this.doors?.children) {
+            this.doors.children.each(door => {
+                door.setData('interactiveType', 'door')
+                if (door.getData('isOpen') === undefined) door.setData('isOpen', false) // sécurité
+            })
+        }
+
+        // Overlap joueur <-> éléments interactifs (portes)
+        this.physics.add.overlap(this.player, this.doors, (player, door) => {
+            this.interactCandidate = door
+        })
+
+        // UI: hint en bas-centre de l’écran (fixe à la caméra)
+        this.interactHint = this.add.text(
+            this.cameras.main.width / 2,
+            this.cameras.main.height - 28,
+            '',
+            { font: '18px Arial', fill: '#ffffff', backgroundColor: '#000000', padding: { x: 10, y: 6 } }
+        ).setOrigin(0.5).setScrollFactor(0).setDepth(1000).setAlpha(0.8).setVisible(false)
+
+        // Recalage si la fenêtre change
+        this.scale.on('resize', () => {
+            this.interactHint?.setPosition(this.cameras.main.width / 2, this.cameras.main.height - 28)
         })
 
          // Création du joueur local
