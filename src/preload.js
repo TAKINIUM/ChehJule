@@ -22,5 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
     checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-    onUpdateProgress: (cb) => ipcRenderer.on('update-download-progress', (_, p) => cb(p))
+    onUpdateProgress: (cb) => ipcRenderer.on('update-download-progress', (_, p) => cb(p)),
+    // Settings
+    getSettings: () => ipcRenderer.invoke('get-settings'),
+    saveSettings: (settings) => ipcRenderer.send('save-settings', settings)
 });

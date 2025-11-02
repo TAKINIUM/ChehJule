@@ -228,6 +228,10 @@ app.whenReady().then(() => {
     ipcMain.on('save-world-slots', (event, slots) => saveManager.saveWorldSlots(slots))
     ipcMain.on('save-world-data', (event, { slotIndex, worldData }) => saveManager.saveWorldData(slotIndex, worldData))
 
+    // Settings (audio volume, etc.)
+    ipcMain.handle('get-settings', () => saveManager.getSettings())
+    ipcMain.on('save-settings', (event, settings) => saveManager.saveSettings(settings))
+
     ipcMain.on('is-host-response', (event, isHost) => {
         if (isHost) {
             event.sender.send('host-quitting')

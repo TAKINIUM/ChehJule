@@ -37,14 +37,17 @@ export class SelectWorldScene extends Phaser.Scene {
 
         // --- UI Principale ---
         this.mainUI = this.add.group()
-        this.mainUI.add(this.add.text(centerX, 80, 'Sélection du Monde', { font: '48px Arial', fill: '#ffffff' }).setOrigin(0.5))
+        this.titleText = this.add.text(centerX, 80, 'Sélection du Monde', { font: '48px Arial', fill: '#ffffff' }).setOrigin(0.5)
+        this.mainUI.add(this.titleText)
+        this.slotCards = []
         this.drawWorldSlots(this.mainUI)
-        this.mainUI.add(this.add.text(centerX, centerY + 180, 'Pseudo :', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5))
+        this.playerLabel = this.add.text(centerX, centerY + 180, 'Pseudo :', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5)
+        this.mainUI.add(this.playerLabel)
         this.nameInput = this.add.dom(centerX - 50, centerY + 230).createFromCache('nameform')
         this.mainUI.add(this.nameInput)
 
-        const saveNameButton = this.add.text(centerX + 120, centerY + 230, 'OK', { font: '24px Arial', fill: '#fff', backgroundColor: '#555', padding: { x: 10, y: 5 } }).setOrigin(0.5).setInteractive();
-        this.mainUI.add(saveNameButton)
+        this.saveNameButton = this.add.text(centerX + 120, centerY + 230, 'OK', { font: '24px Arial', fill: '#fff', backgroundColor: '#555', padding: { x: 10, y: 5 } }).setOrigin(0.5).setInteractive();
+        this.mainUI.add(this.saveNameButton)
 
         // New: toggle solo/host
         this.hostOnline = false
@@ -55,9 +58,9 @@ export class SelectWorldScene extends Phaser.Scene {
         })
         this.mainUI.add(this.modeText)
 
-        const backButton = this.add.text(100, this.cameras.main.height - 50, 'Retour', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5).setInteractive()
-        backButton.on('pointerdown', () => this.scene.start('MenuScene'))
-        this.mainUI.add(backButton)
+        this.backButton = this.add.text(100, this.cameras.main.height - 50, 'Retour', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5).setInteractive()
+        this.backButton.on('pointerdown', () => this.scene.start('MenuScene'))
+        this.mainUI.add(this.backButton)
 
         this.nameInput.getChildByName("nameField").value = this.lastPlayerName
 
@@ -65,7 +68,7 @@ export class SelectWorldScene extends Phaser.Scene {
             window.electronAPI.send('is-host-response', false)
         })
 
-        saveNameButton.on('pointerdown', () => {
+        this.saveNameButton.on('pointerdown', () => {
             const newName = this.nameInput.getChildByName('nameField').value.trim();
             if (newName) {
                 this.lastPlayerName = newName
@@ -74,63 +77,100 @@ export class SelectWorldScene extends Phaser.Scene {
         })
 
         // --- UI de Création de Monde (initialement cachée) ---
-        this.creationUI = this.add.group()
-        this.creationUI.add(this.add.rectangle(centerX, centerY, 500, 300, 0x222222).setStrokeStyle(2, 0xffffff))
-        this.creationUI.add(this.add.text(centerX, centerY - 100, 'Créer un nouveau monde', { font: '32px Arial', fill: '#ffffff' }).setOrigin(0.5))
-        this.worldNameInput = this.add.dom(centerX, centerY - 20).createFromCache('worldform')
-        this.creationUI.add(this.worldNameInput)
+    this.creationUI = this.add.group()
+    this.createRect = this.add.rectangle(centerX, centerY, 500, 300, 0x222222).setStrokeStyle(2, 0xffffff)
+    this.creationTitle = this.add.text(centerX, centerY - 100, 'Créer un nouveau monde', { font: '32px Arial', fill: '#ffffff' }).setOrigin(0.5)
+    this.worldNameInput = this.add.dom(centerX, centerY - 20).createFromCache('worldform')
+    this.creationUI.addMultiple([this.createRect, this.creationTitle, this.worldNameInput])
         
-        const confirmButton = this.add.text(centerX - 80, centerY + 50, 'Confirmer', { font: '24px Arial', fill: '#00ff00' }).setOrigin(0.5).setInteractive()
+    const confirmButton = this.add.text(centerX - 80, centerY + 50, 'Confirmer', { font: '24px Arial', fill: '#00ff00' }).setOrigin(0.5).setInteractive()
         confirmButton.on('pointerdown', () => this.confirmWorldCreation())
         this.creationUI.add(confirmButton)
 
-        const cancelButton = this.add.text(centerX + 80, centerY + 50, 'Annuler', { font: '24px Arial', fill: '#ff0000' }).setOrigin(0.5).setInteractive()
+    const cancelButton = this.add.text(centerX + 80, centerY + 50, 'Annuler', { font: '24px Arial', fill: '#ff0000' }).setOrigin(0.5).setInteractive()
         cancelButton.on('pointerdown', () => this.cancelWorldCreation())
         this.creationUI.add(cancelButton)
         this.creationUI.setVisible(false) // Cacher ce groupe par défaut
 
         // --- Texte d'erreur ---
         this.errorText = this.add.text(centerX, centerY + 270, '', { font: '16px Arial', fill: '#ff0000' }).setOrigin(0.5)
+
+        // Recalculer la mise en page sur resize
+        this.scale.on('resize', this.updateLayout, this)
+        this.updateLayout()
     }
 
     drawWorldSlots(uiGroup) {
         const centerX = this.cameras.main.width / 2
-        for (let i = 0 ; i < 5 ; i++) {
-            const slotY = 180 + (i * 70)
-            const slotData = this.worldSlots[i]
+        const baseY = 160
+        const cardW = Phaser.Math.Clamp(Math.floor(this.cameras.main.width * 0.6), 420, 700)
+        const cardH = 64
 
-            const slotButton = this.add.rectangle(centerX, slotY, 400, 50, 0x555555).setInteractive()
-            slotButton.setStrokeStyle(2, 0xffffff)
-            uiGroup.add(slotButton)
-
-            if (slotData) {
-                // Si le slot est occupé
-                const textObject = this.add.text(centerX - 120, slotY, slotData.name, { font: '24px Arial', fill: '#ffffff' }).setOrigin(0, 0.5)
-                const deleteBtn = this.add.text(centerX + 100, slotY, 'X', { font: '24px Arial', fill: '#ff6666' }).setOrigin(0.5).setInteractive()
-                const exportBtn = this.add.text(centerX + 150, slotY, 'Export', { font: '18px Arial', fill: '#66aaff' }).setOrigin(0.5).setInteractive()
-                
-                slotButton.on('pointerdown', () => this.handleSlotClick(i))
-                deleteBtn.on('pointerdown', () => this.handleDeleteClick(i))
-                exportBtn.on('pointerdown', () => this.handleExportClick(i))
-
-                uiGroup.add(textObject)
-                uiGroup.add(deleteBtn)
-                uiGroup.add(exportBtn)
-            } else {
-                // Si le slot est vide
-                const textObject = this.add.text(centerX, slotY, '[ Emplacement Vide ]', { font: '24px Arial', fill: '#999999' }).setOrigin(0.5)
-                slotButton.on('pointerdown', () => this.handleSlotClick(i))
-                uiGroup.add(textObject)
-            }
+        // Nettoyer anciennes cartes si redraw
+        if (this.slotCards?.length) {
+            this.slotCards.forEach(c => c.shadow?.destroy?.())
+            this.slotCards.forEach(c => c.card?.destroy?.())
+            this.slotCards.forEach(c => c.label?.destroy?.())
+            this.slotCards.forEach(c => c.deleteBtn?.destroy?.())
+            this.slotCards.forEach(c => c.exportBtn?.destroy?.())
+            this.slotCards.length = 0
         }
 
-        const importButton = this.add.text(centerX, 180 + (5 * 70), 'Importer un monde', { font: '24px Arial', fill: '#66ffaa' }).setOrigin(0.5).setInteractive()
-        importButton.on('pointerdown', () => this.handleImportClick())
-        uiGroup.add(importButton)
+        for (let i = 0; i < 5; i++) {
+            const y = baseY + i * (cardH + 12)
+            const slotData = this.worldSlots[i]
 
-        const joinButton = this.add.text(this.cameras.main.width / 2, 180 + (6 * 70), 'Rejoindre un monde', { font: '24px Arial', fill: '#66aaff' }).setOrigin(0.5).setInteractive()
-        joinButton.on('pointerdown', () => this.handleJoinClick())
-        uiGroup.add(joinButton)
+            const shadow = this.add.rectangle(centerX + 6, y + 6, cardW, cardH, 0x000000, 0.4).setScrollFactor(0)
+            const card = this.add.rectangle(centerX, y, cardW, cardH, slotData ? 0x2a2a2a : 0x202020)
+                .setInteractive({ useHandCursor: true }).setStrokeStyle(2, 0xffffff)
+
+            const label = this.add.text(centerX - cardW / 2 + 18, y, slotData ? slotData.name : '[ Emplacement Vide ]', {
+                font: '22px Arial', fill: slotData ? '#ffffff' : '#999999'
+            }).setOrigin(0, 0.5)
+
+            let deleteBtn = null, exportBtn = null
+            if (slotData) {
+                deleteBtn = this.add.text(centerX + cardW / 2 - 70, y, 'Suppr', { font: '18px Arial', fill: '#ff6666' })
+                    .setOrigin(0.5).setInteractive({ useHandCursor: true })
+                exportBtn = this.add.text(centerX + cardW / 2 - 20, y, 'Export', { font: '18px Arial', fill: '#66aaff' })
+                    .setOrigin(0.5).setInteractive({ useHandCursor: true })
+                deleteBtn.on('pointerup', () => this.handleDeleteClick(i))
+                exportBtn.on('pointerup', () => this.handleExportClick(i))
+            }
+
+            card.on('pointerover', () => {
+                this.tweens.add({ targets: [card, label], duration: 120, scaleX: 1.02, scaleY: 1.06, ease: 'Sine.easeOut' })
+                card.setFillStyle(0x333333)
+            })
+            card.on('pointerout', () => {
+                this.tweens.add({ targets: [card, label], duration: 120, scaleX: 1, scaleY: 1, ease: 'Sine.easeOut' })
+                card.setFillStyle(slotData ? 0x2a2a2a : 0x202020)
+            })
+            card.on('pointerup', () => this.handleSlotClick(i))
+
+            uiGroup.addMultiple([shadow, card, label])
+            if (deleteBtn) uiGroup.add(deleteBtn)
+            if (exportBtn) uiGroup.add(exportBtn)
+
+            this.slotCards.push({ shadow, card, label, deleteBtn, exportBtn, index: i, yBase: y, cardW, cardH })
+        }
+
+        // Boutons secondaires
+        this.importButton?.destroy?.()
+        this.joinButton?.destroy?.()
+
+        this.importButton = this.add.text(this.cameras.main.width - 20, this.cameras.main.height - 20,
+            'Importer un monde', { font: '24px Arial', fill: '#66ffaa' })
+            .setOrigin(1, 1).setInteractive({ useHandCursor: true })
+        this.importButton.on('pointerup', () => this.handleImportClick())
+        uiGroup.add(this.importButton)
+
+        const listBottom = baseY + (5 - 1) * (cardH + 12) + cardH / 2
+        this.joinButton = this.add.text(centerX, listBottom + 30, 'Rejoindre un monde', {
+            font: '24px Arial', fill: '#66aaff'
+        }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+        this.joinButton.on('pointerup', () => this.handleJoinClick())
+        uiGroup.add(this.joinButton)
     }
 
     handleSlotClick(slotIndex) {
@@ -191,7 +231,7 @@ export class SelectWorldScene extends Phaser.Scene {
                 this.scene.start('GameScene', {
                     isHost: false,
                     playerName: this.lastPlayerName,
-                    serverAddress: serverAddress // <-- Changement ici
+                    serverAddress: serverAddress
                 });
             } else {
                 cleanup();
@@ -257,5 +297,46 @@ export class SelectWorldScene extends Phaser.Scene {
     cancelWorldCreation() {
         this.creationUI.setVisible(false)
         this.mainUI.setVisible(true)
+    }
+
+    updateLayout() {
+        // Sécurité: la caméra peut être absente pendant un switch de scènes
+        if (!this.cameras || !this.cameras.main) return
+        const cam = this.cameras.main
+        const cx = cam.width / 2
+
+        // Titre
+        this.titleText?.setPosition(cx, 40)
+
+        // Recalcule les positions verticales (sans chevauchement)
+        const cardH = 64
+        const baseY = 160
+        const gap = 12
+
+        // Repositionner chaque carte à la même X, Y déterministe
+        this.slotCards?.forEach((c, i) => {
+            const y = baseY + i * (cardH + gap)
+            const w = Phaser.Math.Clamp(Math.floor(cam.width * 0.6), 420, 700)
+            c.shadow?.setPosition(cx + 6, y + 6).setSize?.(w, cardH)
+            c.card?.setPosition(cx, y).setSize?.(w, cardH)
+            c.label?.setPosition(cx - w / 2 + 18, y)
+            c.deleteBtn?.setPosition(cx + w / 2 - 70, y)
+            c.exportBtn?.setPosition(cx + w / 2 - 20, y)
+        })
+
+        // Zone sous la liste
+        const listBottom = baseY + (5 - 1) * (cardH + gap) + cardH / 2
+
+        // Mode + Pseudo + Input + OK + Erreur (tout bien espacé)
+        this.modeText?.setPosition(cx, listBottom + 30)
+        this.joinButton?.setPosition(cx, listBottom + 60)
+        this.playerLabel?.setPosition(cx, listBottom + 100)
+        this.nameInput?.setPosition(cx - 50, listBottom + 140)
+        this.saveNameButton?.setPosition(cx + 120, listBottom + 140)
+        this.errorText?.setPosition(cx, listBottom + 180)
+
+        // Boutons de coin toujours visibles
+        this.backButton?.setOrigin(0, 1).setPosition(20, cam.height - 20)
+        this.importButton?.setOrigin(1, 1).setPosition(cam.width - 20, cam.height - 20)
     }
 }
