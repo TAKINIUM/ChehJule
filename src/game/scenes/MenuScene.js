@@ -6,53 +6,64 @@ export class MenuScene extends Phaser.Scene {
 
     preload() {
         this.load.image("logo" , "assets/ChehJule1.ico")
-
         this.load.audio('menu_intro', 'assets/audio/Title_intro_Current.wav')
         this.load.audio('menu_loop', 'assets/audio/Title_loop_Current.wav')
     }
 
     async create() {
-        this.sound.pauseOnBlur = false
-        // Charger le volume depuis les réglages
-        try {
-            const settings = await window.electronAPI?.getSettings?.()
-            const vol = settings?.audio?.bgmVolume
-            if (typeof vol === 'number') this.sound.volume = Phaser.Math.Clamp(vol, 0, 1)
-        } catch {}
-
-        // BGM: ne lancer qu'une fois
-        const alreadyPlaying =
-            this.sound.get('menu_loop')?.isPlaying || this.sound.get('menu_intro')?.isPlaying
-        if (!alreadyPlaying && !this.registry.get('bgmStarted')) {
-            const intro = this.sound.add('menu_intro')
-            const loop = this.sound.add('menu_loop', { loop: true })
-            intro.once('complete', () => loop.play())
-            intro.play()
-            this.registry.set('bgmStarted', true)
-        }
 
         this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.TAB])
+
+        // AutoUpdate
 
         window.electronAPI?.onUpdateProgress?.((p) => {
             this.progressText?.setText(`MAJ: ${p.percent}%`)
         })
 
-        // Fond animé (particules)
+        // Musique
+
+        this.sound.pauseOnBlur = false
+        const settings = await window.electronAPI?.getSettings?.()
+        const vol = settings?.audio?.bgmVolume
+        try {
+            if (typeof vol === 'number') this.sound.volume = vol
+        } catch {}
+
+        const alreadyPlaying = this.sound.get("menu-loop")?.isPlaying || this.sound.get("menu-intro")?.isPlaying
+
+        if (!alreadyPlaying && !this.registry.get('bgmStarted')) {
+            const intro = this.sound.add('menu_intro', { volume: vol || 1 })
+            const loop  = this.sound.add('menu_loop', { loop: true, volume: vol || 1 })
+            intro.once('complete', () => {
+                this._resumeAudioNow()
+                if (!loop.isPlaying) loop.play()
+            })
+            intro.play()
+            this.registry.set('bgmStarted', true)
+
+            this._keepAliveEvent?.remove?.()
+            this._keepAliveEvent = this.time.addEvent({
+                delay: 3000,
+                loop: true,
+                callback: this._resumeAudioNow,
+                callbackScope: this
+            })
+        }
+
+        // Menu
+
         this.createBackground()
 
-        // Logo + titre
         this.logo = this.add.image(0 , 140 , "logo").setOrigin(0.5).setScale(0.9)
-        this.tweens.add({ targets: this.logo, y: '+=14', duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
+        this.tweens.add({ targets: this.logo, y: '+=20', duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
 
         this.titleText = this.add.text(0 , 0 , "CHEHJULE" , { font: "64px Arial" , fill: "#ffffff" }).setOrigin(0.5)
-        this.tweens.add({ targets: this.titleText, scale: { from: 1.0, to: 1.08 }, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
+        this.tweens.add({ targets: this.titleText, scale: { from: 1.0, to: 1.12 }, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
 
-        // Boutons stylés (containers)
         this.playButton    = this.createButton(0, 0, 'Jouer',   () => { this.transitionTo('SelectWorldScene') })
         this.optionsButton = this.createButton(0, 0, 'Options', () => { this.toggleOptions(true) })
         this.quitButton    = this.createButton(0, 0, 'Quitter', () => { window.electronAPI.quitApp() })
 
-        // Version et lien GitHub
         const fallbackVersion = "0.0.0"
         let appVersion = fallbackVersion
         try {
@@ -65,11 +76,24 @@ export class MenuScene extends Phaser.Scene {
         this.githubText.on('pointerover', () => this.githubText.setStyle({ fill: '#aaddff' }))
         this.githubText.on('pointerout',  () => this.githubText.setStyle({ fill: '#66aaff' }))
         this.githubText.on('pointerdown', () => window.electronAPI?.openExternal ? window.electronAPI.openExternal(repoUrl) : window.open(repoUrl, "_blank"))
-
+        
         this.scale.on("resize" , this.updateLayout , this)
         this.updateLayout()
 
         window.electronAPI.on('check-if-host', () => { window.electronAPI.send('is-host-response', false) })
+    }
+
+    _resumeAudioNow() {
+        const ctx = this.sound.context
+        if (ctx && ctx.state !== 'running') {
+            try { ctx.resume() } catch {}
+        }
+        const loop = this.sound.get('menu_loop')
+        const intro = this.sound.get('menu_intro')
+        // Si ni l'intro ni le loop ne jouent, on relance la boucle
+        if (loop && !loop.isPlaying && !intro?.isPlaying) {
+            try { loop.play({ loop: true, volume: this.sound.volume || 1 }) } catch {}
+        }
     }
 
     updateLayout() {
@@ -77,25 +101,25 @@ export class MenuScene extends Phaser.Scene {
         const cx = this.cameras.main.width / 2
         const cy = this.cameras.main.height / 2
 
-        // Repositionnement des éléments du menu
+        // Menu
         this.logo?.setPosition(cx, cy - 260)
         this.titleText?.setPosition(cx, cy - 150)
         this.playButton?.setPosition(cx, cy)
         this.optionsButton?.setPosition(cx, cy + 80)
         this.quitButton?.setPosition(cx, cy + 160)
 
-        // Version & GitHub
+        // Coin
         this.versionText?.setPosition(10, this.cameras.main.height - 10)
         this.githubText?.setPosition(this.cameras.main.width - 10, this.cameras.main.height - 10)
 
-        // Panneau Options et slider DOM
+        // Option
+
         if (this.optionsPanel) {
             this.optionsPanel.backdrop
                 ?.setPosition(cx, cy)
                 ?.setSize(this.cameras.main.width, this.cameras.main.height)
             this.optionsPanel.container?.setPosition(cx, cy)
-            // ↓ slider abaissé
-            this.optionsPanel.sliderDom?.setPosition(cx + 60, cy + 10)
+            this.optionsPanel.sliderDom?.setPosition(cx, cy + 10)
         }
     }
 
@@ -119,11 +143,11 @@ export class MenuScene extends Phaser.Scene {
         const cx = this.cameras.main.width / 2
         const cy = this.cameras.main.height / 2
 
-        // Backdrop plein écran pour bloquer les clics derrière
+        // Anti Background Click
         const backdrop = this.add.rectangle(cx, cy, this.cameras.main.width, this.cameras.main.height, 0x000000, 0.25)
             .setScrollFactor(0)
             .setDepth(1999)
-            .setInteractive()             // capture les pointer events
+            .setInteractive() 
             .setVisible(false)
 
         const container = this.add.container(cx, cy).setDepth(2000).setVisible(false)
@@ -131,7 +155,7 @@ export class MenuScene extends Phaser.Scene {
         const bg = this.add.rectangle(0, 0, 520, 220, 0x000000, 0.86)
             .setStrokeStyle(2, 0xffffff)
         const title = this.add.text(0, -90, 'Options', { font: '32px Arial', fill: '#ffffff' }).setOrigin(0.5)
-        const volText = this.add.text(-130, -20, 'Volume musique', { font: '18px Arial', fill: '#ffffff' }).setOrigin(0, 0.5)
+        const volText = this.add.text(0, -40, 'Volume musique', { font: '18px Arial', fill: '#ffffff' }).setOrigin(0.5)
         const closeBtn = this.add.text(0, 70, 'Fermer', {
             font: '20px Arial', fill: '#ffffff', backgroundColor: '#444', padding: { x: 10, y: 6 }
         }).setOrigin(0.5).setInteractive({ useHandCursor: true })
@@ -140,9 +164,9 @@ export class MenuScene extends Phaser.Scene {
         container.add([bg, title, volText, closeBtn])
 
         // Slider DOM — abaissé (y + 10)
-        const sliderDom = this.add.dom(cx + 60, cy + 10).createFromHTML(
+        const sliderDom = this.add.dom(cx, cy + 10).createFromHTML(
             '<input id="bgmSlider" type="range" min="0" max="100" step="1" style="width:240px">'
-        ).setDepth(2001).setVisible(false)
+        ).setDepth(2001).setVisible(false).setOrigin(0.5)
 
         const sliderEl = sliderDom.getChildByID('bgmSlider')
         if (sliderEl) sliderEl.value = String(Math.round((this.sound.volume ?? 1) * 100))
@@ -153,7 +177,7 @@ export class MenuScene extends Phaser.Scene {
         }
         sliderEl?.addEventListener('input', onInput)
 
-        // Sauvegarde des refs + cleanup
+        // Save / CleanUp
         this.optionsPanel = { backdrop, container, bg, title, volText, closeBtn, sliderDom, sliderEl, onInput }
         this.events.once('shutdown', () => {
             try { this.optionsPanel.sliderEl?.removeEventListener('input', onInput) } catch {}
@@ -166,25 +190,24 @@ export class MenuScene extends Phaser.Scene {
     }
 
     createBackground() {
-        // Génère une petite texture circulaire blanche pour les particules
+        // Paticule
         if (!this.textures.exists('spark')) {
             const g = this.make.graphics({ x: 0, y: 0, add: false })
             g.fillStyle(0xffffff, 1)
-            g.fillCircle(8, 8, 8)
-            g.generateTexture('spark', 16, 16)
+            g.fillCircle(10, 10, 10)
+            g.generateTexture('spark', 24, 24)
         }
         const w = this.cameras.main.width
         const h = this.cameras.main.height
-        // Phaser 4: add.particles(x, y, texture, config) retourne un ParticleEmitter
-        this.bgEmitter = this.add.particles(0, h + 20, 'spark', {
+        this.bgEmitter = this.add.particles(0, h + 50, 'spark', {
             x: { min: 0, max: w },
-            lifespan: 6000,
-            speedY: { min: -30, max: -80 },
-            speedX: { min: -10, max: 10 },
+            lifespan: 12000,
+            speedY: { min: -30, max: -130 },
+            speedX: { min: -20, max: 20 },
             scale: { start: 0.8, end: 0 },
             alpha: { start: 0.5, end: 0 },
-            quantity: 2,
-            frequency: 100,
+            quantity: 4,
+            frequency: 120,
             blendMode: 'ADD'
         })
         this.bgEmitter.setDepth(-1)
@@ -238,5 +261,15 @@ export class MenuScene extends Phaser.Scene {
     transitionTo(sceneKey) {
         this.cameras.main.fadeOut(200, 0, 0, 0)
         this.time.delayedCall(210, () => this.scene.start(sceneKey))
+    }
+
+    shutdown() {
+        try { this._keepAliveEvent?.remove?.() } catch {}
+        try {
+            this.game.events.off(Phaser.Core.Events.HIDDEN, this._onHidden)
+            this.game.events.off(Phaser.Core.Events.BLUR,   this._onBlur)
+            this.game.events.off(Phaser.Core.Events.VISIBLE, this._onShow)
+            this.game.events.off(Phaser.Core.Events.FOCUS,   this._onShow)
+        } catch {}
     }
 }

@@ -51,15 +51,17 @@ export class SelectWorldScene extends Phaser.Scene {
 
         // New: toggle solo/host
         this.hostOnline = false
-        this.modeText = this.add.text(centerX, centerY + 130, 'Mode: Solo (cliquer pour héberger en ligne)', { font: '18px Arial', fill: '#ffffaa' }).setOrigin(0.5).setInteractive()
+        this.modeText = this.add.text(centerX, centerY + 130, 'Mode: Solo', { font: '18px Arial', fill: '#ffffaa' }).setOrigin(0.5).setInteractive()
         this.modeText.on('pointerdown', () => {
             this.hostOnline = !this.hostOnline
-            this.modeText.setText(this.hostOnline ? 'Mode: Héberger en ligne' : 'Mode: Solo (cliquer pour héberger en ligne)')
+            this.modeText.setText(this.hostOnline ? 'Mode: Héberger en ligne' : 'Mode: Solo')
         })
         this.mainUI.add(this.modeText)
 
         this.backButton = this.add.text(100, this.cameras.main.height - 50, 'Retour', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5).setInteractive()
-        this.backButton.on('pointerdown', () => this.scene.start('MenuScene'))
+        this.backButton.on('pointerdown', () => {
+            this.scene.start('MenuScene')
+        })
         this.mainUI.add(this.backButton)
 
         this.nameInput.getChildByName("nameField").value = this.lastPlayerName
@@ -130,9 +132,9 @@ export class SelectWorldScene extends Phaser.Scene {
 
             let deleteBtn = null, exportBtn = null
             if (slotData) {
-                deleteBtn = this.add.text(centerX + cardW / 2 - 70, y, 'Suppr', { font: '18px Arial', fill: '#ff6666' })
+                deleteBtn = this.add.text(centerX + cardW / 2 - 100, y, 'Suppr', { font: '18px Arial', fill: '#ff6666' })
                     .setOrigin(0.5).setInteractive({ useHandCursor: true })
-                exportBtn = this.add.text(centerX + cardW / 2 - 20, y, 'Export', { font: '18px Arial', fill: '#66aaff' })
+                exportBtn = this.add.text(centerX + cardW / 2 - 40, y, 'Export', { font: '18px Arial', fill: '#66aaff' })
                     .setOrigin(0.5).setInteractive({ useHandCursor: true })
                 deleteBtn.on('pointerup', () => this.handleDeleteClick(i))
                 exportBtn.on('pointerup', () => this.handleExportClick(i))
@@ -300,7 +302,6 @@ export class SelectWorldScene extends Phaser.Scene {
     }
 
     updateLayout() {
-        // Sécurité: la caméra peut être absente pendant un switch de scènes
         if (!this.cameras || !this.cameras.main) return
         const cam = this.cameras.main
         const cx = cam.width / 2
@@ -308,26 +309,22 @@ export class SelectWorldScene extends Phaser.Scene {
         // Titre
         this.titleText?.setPosition(cx, 40)
 
-        // Recalcule les positions verticales (sans chevauchement)
         const cardH = 64
         const baseY = 160
         const gap = 12
 
-        // Repositionner chaque carte à la même X, Y déterministe
         this.slotCards?.forEach((c, i) => {
             const y = baseY + i * (cardH + gap)
             const w = Phaser.Math.Clamp(Math.floor(cam.width * 0.6), 420, 700)
             c.shadow?.setPosition(cx + 6, y + 6).setSize?.(w, cardH)
             c.card?.setPosition(cx, y).setSize?.(w, cardH)
             c.label?.setPosition(cx - w / 2 + 18, y)
-            c.deleteBtn?.setPosition(cx + w / 2 - 70, y)
-            c.exportBtn?.setPosition(cx + w / 2 - 20, y)
+            c.deleteBtn?.setPosition(cx + w / 2 - 100, y)
+            c.exportBtn?.setPosition(cx + w / 2 - 40, y)
         })
 
-        // Zone sous la liste
         const listBottom = baseY + (5 - 1) * (cardH + gap) + cardH / 2
 
-        // Mode + Pseudo + Input + OK + Erreur (tout bien espacé)
         this.modeText?.setPosition(cx, listBottom + 30)
         this.joinButton?.setPosition(cx, listBottom + 60)
         this.playerLabel?.setPosition(cx, listBottom + 100)

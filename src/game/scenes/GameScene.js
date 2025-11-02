@@ -20,6 +20,9 @@ export class GameScene extends Phaser.Scene {
 
         this.interactHint = null
         this.lastUpdateTime = 0
+        this._highlightDoor = null
+        this._highlightSprite = null
+        this._highlightTween = null
 
         // debug
         this._debug = { enabled: false }
@@ -207,13 +210,39 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.player, this.doors)
 
         // 10) UI: hint d’interaction
-        this.interactHint = this.add.text(
-            this.cameras.main.width / 2,
-            this.cameras.main.height - 28,
-            '',
-            { font: '18px Arial', fill: '#ffffff', backgroundColor: '#000000', padding: { x: 10, y: 6 } }
-        ).setOrigin(0.5).setScrollFactor(0).setDepth(1000).setAlpha(0.85).setVisible(false)
-        this.scale.on('resize', () => this.interactHint.setPosition(this.cameras.main.width / 2, this.cameras.main.height - 28))
+        this.interactKey = 'E'
+        this.keys = this.keys || {}
+        this.keys.interact = this.keys.interact || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
+
+        this._interaction = {
+            hint: this.add.text(0, 0, '', {
+                font: '18px Arial',
+                fill: '#ffffff',
+                backgroundColor: '#000000',
+                padding: { x: 10, y: 6 }
+            })
+                .setOrigin(0.5)
+                .setDepth(10001)
+                .setVisible(false),
+            target: null
+        }
+
+        // position initiale + resize
+        this._anchorInteractionHint()
+        this.scale.on('resize', () => this._anchorInteractionHint())
+
+        // Overlay de surbrillance
+        this._hlGfx = this.add.graphics().setDepth(10000).setVisible(false)
+        this._hlTween = null
+
+        this.events.once('shutdown', () => {
+            try { this._interaction?.hint?.destroy() } catch {}
+            try { this._hlTween?.stop() } catch {}
+            try { this._hlGfx?.destroy() } catch {}
+            this._interaction = null
+            this._hlTween = null
+            this._hlGfx = null
+        })
 
         // 11) Caméra & contrôles
         this.cameras.main.startFollow(this.player, true)
@@ -246,44 +275,113 @@ export class GameScene extends Phaser.Scene {
 
     // ---------- Interaction portes ----------
     getNearestInteractible() {
-        if (!this.doors) return null
-        const doors = this.doors.getChildren()
-        let best = null, bestD = 9999
-        for (const d of doors) {
-            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, d.x, d.y)
-            if (dist < bestD && dist < 64) { best = d; bestD = dist }
+         const candidates = []
+        if (this.doors?.getChildren) candidates.push(...this.doors.getChildren())
+
+        if (!this.player || candidates.length === 0) return null
+
+        let best = null
+        let bestD = 9999
+        for (const obj of candidates) {
+            if (!obj || !obj.active) continue
+            const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, obj.x, obj.y)
+            if (d < bestD && d < 64) {
+                best = obj
+                bestD = d
+            }
         }
         return best
     }
+
     getInteractionLabel(target) {
         if (!target) return ''
-        const isOpen = !!target.isOpen
-        return `E — ${isOpen ? 'Fermer' : 'Ouvrir'} la porte`
+        // Porte
+       if (target.doorId !== undefined) {
+            const verb = target.isOpen ? 'Fermer la porte' : 'Ouvrir la porte'
+            return `${this.interactKey} — ${verb}`
+        }
+        return `${this.interactKey} — Interagir`
     }
+
     getDoorFrameIndex(door) {
-        const mapDir = { up: 0, right: 1, down: 2, left: 3 }
-        const base = (mapDir[door.direction] ?? 0)
+        const dirMap = { up: 0, right: 1, down: 2, left: 3 }
+        const base = dirMap[door.direction] ?? 0
         return base + (door.isOpen ? 4 : 0)
     }
+
     updateDoorState(door, isOpen) {
         door.isOpen = !!isOpen
-        door.setFrame(this.getDoorFrameIndex(door))
+        if (door.setFrame) door.setFrame(this.getDoorFrameIndex(door))
         if (door.body) {
             door.body.enable = !door.isOpen
             if (door.body.checkCollision) door.body.checkCollision.none = door.isOpen
         }
     }
+    
     handleInteraction() {
         if (!Phaser.Input.Keyboard.JustDown(this.keys.interact)) return
-        const door = this.getNearestInteractible()
-        if (!door) return
+        const target = this.getNearestInteractible()
+        if (!target) return
 
-        if (this.runMode === 'solo' || (this.isHost && !NetworkManager.socket)) {
-            this.updateDoorState(door, !door.isOpen)
-            return
+        if (this.doors?.contains?.(target)) {
+            this.updateDoorState(target, !target.isOpen)
         }
-        NetworkManager.send({ type: 'door-update', doorId: door.doorId, isOpen: !door.isOpen })
     }
+
+    _setHighlightedTarget(target) {
+        if (this._interaction?.target && this._interaction.target !== target) {
+            const prev = this._interaction.target
+            prev?.clearTint?.()
+            this._hlTween?.stop()
+            this._hlTween = null
+            this._hlGfx?.clear()?.setVisible(false)
+        }
+        this._interaction.target = target
+        if (!target) return
+
+        target.setTint?.(0xffffaa)
+
+        const w = target.displayWidth || 32
+        const h = target.displayHeight || 32
+        this._hlGfx.clear()
+        this._hlGfx.lineStyle(2, 0xffff66, 1)
+        this._hlGfx.strokeRect(target.x - w / 2 - 2, target.y - h / 2 - 2, w + 4, h + 4)
+        this._hlGfx.setAlpha(0.5).setVisible(true)
+
+        this._hlTween = this.tweens.add({
+            targets: this._hlGfx,
+            alpha: { from: 0.35, to: 1 },
+            duration: 420,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        })
+    }
+
+    _anchorInteractionHint() {
+        if (!this._interaction?.hint) return
+        const cam = this.cameras.main
+        const x = cam.worldView.centerX
+        const y = cam.worldView.y + cam.worldView.height - 26
+        this._interaction.hint.setPosition(x, y)
+    }
+
+    _updateInteractionUI() {
+        if (!this._interaction) return
+
+        this._anchorInteractionHint()
+
+        const cand = this.getNearestInteractible()
+        this._setHighlightedTarget(cand)
+
+        if (cand) {
+            const label = this.getInteractionLabel(cand)
+            this._interaction.hint.setText(label).setVisible(true)
+        } else {
+            this._interaction.hint.setVisible(false)
+        }
+    }
+
 
     // ---------- Réseau ----------
     initializeNetwork() {
@@ -493,7 +591,14 @@ export class GameScene extends Phaser.Scene {
 
     // ---------- Update ----------
     update(time, delta) {
-        if (!this.player || !this.keys || (this.pauseMenu?.visible)) return
+        if (!this.player || !this.keys) return
+        if (this.pauseMenu?.visible) {
+            if (this._interaction?.hint?.visible) {
+                this._setHighlightedTarget(null)
+                this._interaction.hint.setVisible(false)
+            }
+            return
+        }
 
         const speed = 200
         let vx = 0, vy = 0
@@ -505,9 +610,7 @@ export class GameScene extends Phaser.Scene {
         this.player.body.velocity.normalize().scale(speed)
 
         // Interaction
-        const cand = this.getNearestInteractible()
-        const label = this.getInteractionLabel(cand)
-        this.interactHint.setVisible(!!label).setText(label || '')
+        this._updateInteractionUI()
         this.handleInteraction()
 
         // Affichage noms + interp autres joueurs

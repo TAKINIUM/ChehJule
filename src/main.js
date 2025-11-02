@@ -1,4 +1,4 @@
-const {app , BrowserWindow , ipcMain , protocol , dialog , shell} = require("electron")
+const {app , BrowserWindow , ipcMain , protocol , dialog , shell , powerSaveBlocker} = require("electron")
 const path = require("path")
 const fs = require('fs')
 const saveManager = require('./game/SaveManager')
@@ -7,9 +7,18 @@ const { Server } = require('socket.io')
 const os = require('os')
 const { autoUpdater } = require("electron-updater")
 
-const instanceId = Date.now().toString();
-app.setPath('userData', `${app.getPath('userData')}-${instanceId}`)
+// In development, isolate userData per run to avoid conflicts; keep stable path in production
+if (!app.isPackaged) {
+    const instanceId = Date.now().toString();
+    app.setPath('userData', `${app.getPath('userData')}-${instanceId}`)
+}
 
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+app.on('ready', () => {
+    try { psbId = powerSaveBlocker.start('prevent-app-suspension') } catch {}
+})
+
+let psbId = 0
 let mainWindow
 let isQuitting = false
 let io
@@ -121,7 +130,8 @@ function createWindow() {
         minWidth: 800,
         minHeight: 450,
         webPreferences: {
-            preload: path.join(__dirname , "preload.js")
+            preload: path.join(__dirname , "preload.js"),
+            backgroundThrottling: false
         }
     })
 
@@ -274,14 +284,7 @@ app.whenReady().then(() => {
         return { success: false }
     })
 
-    try {
-        autoUpdater.autoDownload = true
-        autoUpdater.autoInstallOnAppQuit = true
-        autoUpdater.checkForUpdatesAndNotify()
-        autoUpdater.on("error" , (e) => console.warn("AutoUpdate error: " , e?.message || e))
-    } catch (e) {
-        console.warn("autoUpdate init failed: " , e?.message || e)
-    }
+    // Legacy auto-update block removed in favor of interactive flow (wireAutoUpdater + checkForUpdatesInteractive)
 
     ipcMain.handle('check-for-updates', async () => {
         wireAutoUpdater()
@@ -301,6 +304,10 @@ app.on('window-all-closed', function () {
         httpServer.close();
     }
     if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+    try { if (psbId) powerSaveBlocker.stop(psbId) } catch {}
 })
 
 ipcMain.on("quit-app" , () => {
