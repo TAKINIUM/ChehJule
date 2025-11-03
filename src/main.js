@@ -23,6 +23,7 @@ let mainWindow
 let isQuitting = false
 let io
 let httpServer
+let installAfterDownloadRequested = false
 
 let updaterWired = false
 function wireAutoUpdater() {
@@ -36,22 +37,25 @@ function wireAutoUpdater() {
 
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
+    installAfterDownloadRequested = false
 
     autoUpdater.on('error', (e) => {
         console.warn('[updater] error', e?.stack || e?.message || e)
     })
 
     autoUpdater.on('update-available', async (info) => {
+        // Propose a single action: Installer maintenant (download then auto-install when ready)
         const { response } = await dialog.showMessageBox(mainWindow, {
             type: 'info',
-            buttons: ['Télécharger maintenant', 'Plus tard'],
+            buttons: ['Installer maintenant', 'Plus tard'],
             defaultId: 0,
             cancelId: 1,
             title: 'Mise à jour disponible',
             message: `Une nouvelle version ${info.version} est disponible.`,
-            detail: 'Voulez-vous la télécharger maintenant ? Vous pourrez l’installer ensuite.'
+            detail: 'Installer maintenant va télécharger puis appliquer la mise à jour.'
         })
         if (response === 0) {
+            installAfterDownloadRequested = true
             autoUpdater.downloadUpdate()
         }
     })
@@ -66,6 +70,12 @@ function wireAutoUpdater() {
     })
 
     autoUpdater.on('update-downloaded', async (info) => {
+        if (installAfterDownloadRequested) {
+            isQuitting = true
+            autoUpdater.quitAndInstall()
+            return
+        }
+        // Fallback if update was downloaded by some other path: offer to install now
         const { response } = await dialog.showMessageBox(mainWindow, {
             type: 'question',
             buttons: ['Redémarrer et installer', 'Plus tard'],
@@ -79,6 +89,11 @@ function wireAutoUpdater() {
             isQuitting = true
             autoUpdater.quitAndInstall()
         }
+    })
+
+    autoUpdater.on('update-not-available', () => {
+        // Optional: could notify renderer that app is up-to-date
+        // mainWindow?.webContents.send('update-not-available')
     })
 }
 
