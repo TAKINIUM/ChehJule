@@ -1,4 +1,6 @@
 import { NetworkManager } from '../network/NetworkManager.js'
+import { Inventory } from '../objects/Inventory.js'
+import { ITEMS , loadItemAssets } from '../objects/Items.js'
 
 export class GameScene extends Phaser.Scene {
     constructor() {
@@ -28,6 +30,9 @@ export class GameScene extends Phaser.Scene {
         this._debug = { enabled: false }
         this._debugGfx = null
         this._debugTimer = null
+
+        this.uiLayer = null
+        this.uiCamera = null
     }
 
     init(data) {
@@ -49,13 +54,14 @@ export class GameScene extends Phaser.Scene {
         this.load.spritesheet('trees', 'assets/images/Trees.png', { frameWidth: 64, frameHeight: 64 })
         this.load.spritesheet('plants','assets/images/Plants.png',{ frameWidth: 32, frameHeight: 32 })
         this.load.spritesheet('beds',  'assets/images/Beds.png',  { frameWidth: 64, frameHeight: 64 })
+        loadItemAssets(this)
     }
 
     async create() {
         this.sound.pauseOnBlur = false
         this.input.keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.TAB])
 
-        // 1) Carte & helpers
+        //  Carte & helpers
         const map = this.make.tilemap({ key: 'map' })
         const tileset = map.addTilesetImage('Tileset', 'tiles')
         const layerSol       = map.createLayer('Sol', tileset, 0, 0)
@@ -77,7 +83,7 @@ export class GameScene extends Phaser.Scene {
         const FLIP_H = 0x80000000, FLIP_V = 0x40000000, FLIP_D = 0x20000000
         const frameFromGid = (ts, gid) => ((gid >>> 0) & ~(FLIP_H | FLIP_V | FLIP_D)) - ts.firstgid
 
-        // 2) Groupes statiques
+        //  Groupes statiques
         this.borderWalls = this.physics.add.staticGroup()
         this.trees       = this.physics.add.staticGroup()
         this.pots        = this.physics.add.staticGroup()
@@ -86,7 +92,7 @@ export class GameScene extends Phaser.Scene {
         this.caches      = this.add.group()
         this.doors       = this.physics.add.staticGroup()
 
-        // 3) Portes (depuis calque d’objets "Porte")
+        //  Portes (depuis calque d’objets "Porte")
         {
             const doorObjs = getObjs('Porte')
             doorObjs.forEach((doorObj, index) => {
@@ -116,7 +122,7 @@ export class GameScene extends Phaser.Scene {
             })
         }
 
-        // 4) Bordures (rectangles invisibles)
+        //  Bordures (rectangles invisibles)
         for (const o of getObjs('Bordure')) {
             const rx = o.x + o.width / 2
             const ry = o.y + o.height / 2
@@ -127,7 +133,7 @@ export class GameScene extends Phaser.Scene {
             this.borderWalls.add(rect)
         }
 
-        // 5) Arbres (Trees) et Pots (Plants)
+        //  Arbres (Trees) et Pots (Plants)
         const addStaticFromTileObj = (layerName, tilesetName, textureKey) => {
             const ts = tsByName(tilesetName); if (!ts) return []
             const tw = ts.tileWidth, th = ts.tileHeight
@@ -147,7 +153,7 @@ export class GameScene extends Phaser.Scene {
         addStaticFromTileObj('Arbre', 'Trees',  'trees').forEach(s => this.trees.add(s))
         addStaticFromTileObj('Pots',  'Plants', 'plants').forEach(s => this.pots.add(s))
 
-        // 6) Lits (Beds 64x64) + colliders précis
+        //  Lits (Beds 64x64) + colliders précis
         {
             const ts = tsByName('Beds')
             if (ts) {
@@ -178,7 +184,7 @@ export class GameScene extends Phaser.Scene {
             }
         }
 
-        // 7) Cachettes (affichage)
+        //  Cachettes (affichage)
         {
             const ts = tsByName('Tileset')
             if (ts) {
@@ -192,7 +198,7 @@ export class GameScene extends Phaser.Scene {
             }
         }
 
-        // 8) Joueur
+        //  Joueur
         const savedPlayerPos = this.worldData.players[this.playerName]
         const spawnObj = getObjs('PlayerSpawn')[0]
         const spawn = savedPlayerPos || { x: (spawnObj?.x || 100), y: (spawnObj?.y || 100) }
@@ -200,7 +206,7 @@ export class GameScene extends Phaser.Scene {
         this.player.body.setSize(24, 24)
         this.player.nameText = this.add.text(0, 0, this.playerName, { font: '14px Arial', fill: '#ffffff' }).setOrigin(0.5)
 
-        // 9) Collisions (après création du joueur)
+        //  Collisions (après création du joueur)
         if (wallsLayer)   this.physics.add.collider(this.player, wallsLayer)
         if (decoColLayer) this.physics.add.collider(this.player, decoColLayer)
         this.physics.add.collider(this.player, this.borderWalls)
@@ -209,7 +215,39 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.collider(this.player, this.bedColliders)
         this.physics.add.collider(this.player, this.doors)
 
-        // 10) UI: hint d’interaction
+        //  Caméra & contrôles
+        this.cameras.main.startFollow(this.player, true)
+        this.cameras.main.setLerp(0.1, 0.1)
+        this.cameras.main.setZoom(2)
+        this.keys = this.input.keyboard.addKeys({ up: 'Z', down: 'S', left: 'Q', right: 'D', interact: 'E' })
+
+        // UI: couche dédiée et caméra UI (zoom 1) qui n'affiche QUE l'UI
+        this.uiLayer = this.add.layer().setDepth(10000)
+        this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height).setZoom(1).setScroll(0, 0)
+        // La caméra monde n'affiche pas l'UI
+        this.cameras.main.ignore(this.uiLayer)
+        // La caméra UI n'affiche pas le monde (tuiles, objets, joueur...) — sinon double rendu à zoom 1
+        this.uiCamera.ignore([
+            layerSol, layerPlancher, layerRoute, wallsLayer, decoColLayer,
+            this.borderWalls, this.trees, this.pots, this.bedColliders, this.beds, this.caches, this.doors,
+            this.player, this.player.nameText
+        ])
+
+        // Inventaire + Hotbar UI
+        this.worldData = this.worldData || {}
+        this.worldData.inventories = this.worldData.inventories || {}
+        const existing = this.worldData.inventories[this.playerName]
+        this.inventory = new Inventory(10, existing)
+        if (!existing) {
+            const amount = Phaser.Math.Between(5, 50)
+            this.inventory.add(ITEMS.money.id, amount)
+            this.worldData.inventories[this.playerName] = this.inventory.toJSON()
+        }
+        this._buildHotbar()
+        this.inventory.onChanged(() => this._refreshHotbar())
+        this._refreshHotbar()
+        
+        //  UI: hint d’interaction
         this.interactKey = 'E'
         this.keys = this.keys || {}
         this.keys.interact = this.keys.interact || this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
@@ -227,13 +265,24 @@ export class GameScene extends Phaser.Scene {
             target: null
         }
 
-        // position initiale + resize
+        this.uiLayer.add(this._interaction.hint)
         this._anchorInteractionHint()
-        this.scale.on('resize', () => this._anchorInteractionHint())
 
-        // Overlay de surbrillance
-        this._hlGfx = this.add.graphics().setDepth(10000).setVisible(false)
+        this._hlGfx = this.add.graphics().setDepth(9999).setVisible(false)
+        // Ne pas rendre le highlight via la caméra UI
+        this.uiCamera.ignore(this._hlGfx)
         this._hlTween = null
+
+        // Resize: redimensionner la caméra UI + re-ancrer l’UI
+        this.scale.on('resize', (gs) => {
+            this.uiCamera.setSize(gs.width, gs.height)
+            this._anchorHotbar()
+            this._anchorInteractionHint()
+            this._anchorPauseMenu()
+        })
+
+        // Assure que la caméra UI n'affiche que la couche UI
+        this._refreshUiCameraIgnores()
 
         this.events.once('shutdown', () => {
             try { this._interaction?.hint?.destroy() } catch {}
@@ -244,33 +293,59 @@ export class GameScene extends Phaser.Scene {
             this._hlGfx = null
         })
 
-        // 11) Caméra & contrôles
-        this.cameras.main.startFollow(this.player, true)
-        this.cameras.main.setLerp(0.1, 0.1)
-        this.cameras.main.setZoom(2)
-        this.keys = this.input.keyboard.addKeys({ up: 'Z', down: 'S', left: 'Q', right: 'D', interact: 'E' })
+        //  Pause menu (UI only via uiLayer + uiCamera)
+        this.pauseMenu = this.add.container(0, 0).setDepth(2).setVisible(false)
+        this.uiLayer.add(this.pauseMenu)
 
-        // 12) Pause menu (léger)
-        this.pauseMenu = this.add.group()
-        const rect = this.add.rectangle(this.cameras.main.width / 2, this.cameras.main.height / 2, 300, 200, 0x000000, 0.8).setScrollFactor(0)
-        const btn = (y, t, cb) => this.add.text(rect.x, rect.y + y, t, { font: '24px Arial', fill: '#fff' }).setOrigin(0.5).setInteractive().setScrollFactor(0).on('pointerdown', cb)
-        this.pauseMenu.addMultiple([rect, btn(-50, 'Continuer', () => this.togglePauseMenu(false)), btn(0, 'Sauvegarder', () => this.saveCurrentWorldState()), btn(50, 'Retour au Menu', () => this.leaveWorldAndGoToMenu())])
-        this.pauseMenu.setVisible(false)
+        const pmBg = this.add.rectangle(0, 0, 300, 200, 0x000000, 0.8).setOrigin(0.5)
+        const pmBtn = (y, label, cb) => this.add.text(0, y, label, { font: '24px Arial', fill: '#ffffff' })
+            .setOrigin(0.5)
+            .setInteractive({ useHandCursor: true })
+            .on('pointerdown', cb)
+
+        const btnContinue = pmBtn(-50, 'Continuer', () => this.togglePauseMenu(false))
+        const btnSave     = pmBtn(0,    'Sauvegarder', () => this.saveCurrentWorldState())
+        const btnExit     = pmBtn(50,   'Retour au Menu', () => this.leaveWorldAndGoToMenu())
+
+        this.pauseMenu.add([pmBg, btnContinue, btnSave, btnExit])
+        this._anchorPauseMenu()
         this.input.keyboard.on('keydown-ESC', () => this.togglePauseMenu(!this.pauseMenu.visible))
 
-        // 13) Debug collisions (F1)
-        this._debugGfx = this.add.graphics().setDepth(9999).setAlpha(0.65)
+        //  Debug collisions (F1)
+    this._debugGfx = this.add.graphics().setDepth(9999).setAlpha(0.65)
+        // Ne pas rendre le debug via la caméra UI
+        this.uiCamera.ignore(this._debugGfx)
         this.input.keyboard.on('keydown-F1', () => {
             this._debug.enabled = !this._debug.enabled
             this._debugGfx.clear()
             if (this._debug.enabled) this.drawCollisionTiles(wallsLayer, decoColLayer)
         })
 
-        // 14) Réseau
+        // Réseau
         this.events.once('shutdown', () => this.cleanupResources())
         this.events.once('destroy',  () => this.cleanupResources())
         this.setupQuitIpc()
         this.initializeNetwork()
+
+    }
+
+    _anchorPauseMenu() {
+        if (!this.pauseMenu) return
+        const cx = this.scale.width / 2
+        const cy = this.scale.height / 2
+        this.pauseMenu.setPosition(cx, cy)
+    }
+
+    // Limite la caméra UI à la couche UI uniquement
+    _refreshUiCameraIgnores() {
+        if (!this.uiCamera || !this.uiLayer) return
+        // Tous les objets de la scène
+        const all = this.children.list.slice()
+        // Les enfants de la couche UI (à conserver sur la caméra UI)
+        const uiChildren = this.uiLayer.list || []
+        // Ignorer tout ce qui n'est pas l'UI
+        const nonUi = all.filter(go => go !== this.uiLayer && !uiChildren.includes(go))
+        this.uiCamera.ignore(nonUi)
     }
 
     // ---------- Interaction portes ----------
@@ -382,11 +457,71 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    // Hotbat UI
+
+    _buildHotbar() {
+        const slotSize = 42, gap = 8, count = 10
+        const totalW = slotSize * count + gap * (count - 1)
+
+        this.hotbar = {
+            container: this.add.container(0, 0).setDepth(1),
+            slots: []
+        }
+        // placer la hotbar sur la couche UI (rendra via la caméra UI)
+        this.uiLayer.add(this.hotbar.container)
+
+        const bg = this.add.rectangle(0, 0, totalW + 16, slotSize + 16, 0x000000, 0.45).setOrigin(0.5)
+        this.hotbar.container.add(bg)
+
+        for (let i = 0; i < count; i++) {
+            const x = -totalW / 2 + i * (slotSize + gap) + slotSize / 2
+            const rect = this.add.rectangle(x, 0, slotSize, slotSize, 0x1b1b1b, 0.9).setStrokeStyle(2, 0xffffff).setOrigin(0.5)
+            const icon = this.add.image(x, 0, 'money').setVisible(false)
+            icon.setDisplaySize(28, 28)
+            const qty = this.add.text(x + 12, 12, '', { font: '14px Arial', fill: '#ffffff' }).setOrigin(1, 1).setVisible(false)
+
+            this.hotbar.container.add(rect)
+            this.hotbar.container.add(icon)
+            this.hotbar.container.add(qty)
+            this.hotbar.slots.push({ rect, icon, qty })
+        }
+
+        this._anchorHotbar()
+    }
+
+    _anchorHotbar() {
+        // coordonnées écran (caméra UI, zoom 1)
+        const x = this.scale.width / 2
+        const y = this.scale.height - 64
+        this.hotbar?.container?.setPosition(x, y)
+    }
+
+    _anchorInteractionHint() {
+        if (!this._interaction?.hint) return
+        const x = this.scale.width / 2
+        const y = this.scale.height - 26
+        this._interaction.hint.setPosition(x, y)
+    }
+
+    _refreshHotbar() {
+        if (!this.hotbar || !this.inventory) return
+        for (let i = 0; i < this.hotbar.slots.length; i++) {
+            const view = this.hotbar.slots[i]
+            const slot = this.inventory.get(i)
+            if (slot) {
+                view.icon.setTexture(ITEMS[slot.id]?.icon || 'money').setVisible(true)
+                view.qty.setText(String(slot.qty)).setVisible(true)
+            } else {
+                view.icon.setVisible(false)
+                view.qty.setVisible(false)
+            }
+        }
+    }
+
 
     // ---------- Réseau ----------
     initializeNetwork() {
-        const loadingText = (this.runMode === 'solo') ? null :
-            this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, 'Connexion en cours...', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5).setScrollFactor(0)
+        const loadingText = (this.runMode === 'solo') ? null : this.add.text(this.cameras.main.width / 2, this.cameras.main.height / 2, 'Connexion en cours...', { font: '24px Arial', fill: '#ffffff' }).setOrigin(0.5).setScrollFactor(0)
 
         NetworkManager.handleData = (data) => {
             if (!data || !data.type) return
@@ -397,13 +532,16 @@ export class GameScene extends Phaser.Scene {
                 case 'full-world-state':
                     data.doors.forEach((st, i) => { const d = this.doors.children.entries[i]; if (d) this.updateDoorState(d, st.isOpen) })
                     data.players.forEach(p => { if (p.socketId !== this.mySocketId) this.addOrUpdateOtherPlayer(p.socketId, p) })
+                    this.worldData.inventories = data.inventories || this.worldData.inventories || {}
+                    const myInv = this.worldData.inventories[this.playerName]
+                    if (myInv) this.inventory?.fromJSON(myInv)
+                    this._refreshHotbar()
                     break
                 case 'state-update':
                     data.players?.forEach(p => { if (p.socketId !== this.mySocketId) this.addOrUpdateOtherPlayer(p.socketId, p) })
                     data.doors?.forEach((st, i) => { const d = this.doors.children.entries[i]; if (d) this.updateDoorState(d, st.isOpen) })
                     break
                 case 'player-left':
-                    this.removeOtherPlayer(data.socketId)
                     break
                 case 'door-update':
                     const d = this.doors.children.entries.find(dd => dd.doorId === data.doorId)
@@ -431,6 +569,10 @@ export class GameScene extends Phaser.Scene {
                         if (p) {
                             const name = p.nameText?.text || ('socket-' + from)
                             this.worldData.players[name] = { x: p.x, y: p.y }
+                            if (data?.inventory) {
+                                this.worldData.inventories = this.worldData.inventories || {}
+                                this.worldData.inventories[name] = data.inventory
+                            }
                             window.electronAPI.saveWorldData(this.slotIndex, this.worldData)
                         }
                         this.removeOtherPlayer(from)
@@ -483,6 +625,8 @@ export class GameScene extends Phaser.Scene {
             p.nameText = this.add.text(playerInfo.x, playerInfo.y - 20, playerInfo.name || 'Joueur', { font: '14px Arial', fill: '#ffffff' }).setOrigin(0.5)
             p.targetX = playerInfo.x; p.targetY = playerInfo.y
             this.otherPlayers.set(peerId, p)
+            // La caméra UI ne doit pas afficher les entités du monde
+            this.uiCamera?.ignore([p, p.nameText])
         } else {
             const p = this.otherPlayers.get(peerId)
             p.targetX = playerInfo.x; p.targetY = playerInfo.y
@@ -518,7 +662,8 @@ export class GameScene extends Phaser.Scene {
         const doors = this.doors.children.entries.map(d => ({ isOpen: d.isOpen }))
         const players = [{ socketId: this.mySocketId, name: this.playerName, x: this.player.x, y: this.player.y }]
         this.otherPlayers.forEach((p, id) => players.push({ socketId: id, name: p.nameText.text, x: p.x, y: p.y }))
-        return { doors, players }
+        const inventories = this.worldData.inventories || {}
+        return { doors, players, inventories }
     }
 
     // ---------- UI & sauvegarde ----------
@@ -526,11 +671,25 @@ export class GameScene extends Phaser.Scene {
     saveCurrentWorldState() {
         if (!this.isHost) return
         this.worldData.players[this.playerName] = { x: this.player.x, y: this.player.y }
-        this.otherPlayers.forEach(p => { if (p.nameText?.text) this.worldData.players[p.nameText.text] = { x: p.x, y: p.y } })
+        this.worldData.inventories = this.worldData.inventories || {}
+        this.worldData.inventories[this.playerName] = this.inventory?.toJSON() || []
+        this.otherPlayers.forEach(p => {
+            if (p.nameText?.text) this.worldData.players[p.nameText.text] = { x: p.x, y: p.y }
+        })
         this.worldData.doors = this.doors.children.entries.map(d => ({ isOpen: d.isOpen }))
         window.electronAPI.saveWorldData(this.slotIndex, this.worldData)
     }
     leaveWorldAndGoToMenu() {
+        if (!this.isHost && this.runMode !== 'solo') {
+            try {
+                NetworkManager.send({
+                    type: 'player-left',
+                    playerName: this.playerName,
+                    x: this.player.x, y: this.player.y,
+                    inventory: this.inventory?.toJSON() || []
+                })
+            } catch {}
+        }
         if (this.isHost) this.saveCurrentWorldState()
         this.cleanupResources()
         this.scene.start('MenuScene')
